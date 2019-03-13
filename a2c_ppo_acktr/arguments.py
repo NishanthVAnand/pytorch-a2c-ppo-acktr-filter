@@ -69,9 +69,13 @@ def get_args():
                         help='enable visdom visualization')
     parser.add_argument('--port', type=int, default=8097,
                         help='port to run the server on (default: 8097)')
-    parser.add_argument('--est_beta_value', type=int, default=1)
-    parser.add_argument('--lr_beta', type=float, default=1e-4)
-    parser.add_argument('--reg_beta', type=float, default=0.)
+
+    parser.add_argument('--est_filter', type=int, default=0)
+    parser.add_argument('--filter_type', type=str, default="FIR")
+    parser.add_argument('--filter_memory', type=int, default=8)
+    parser.add_argument('--lr_filter', type=float, default=1e-4)
+    parser.add_argument('--reg_filter', type=float, default=0.)
+
     parser.add_argument('--disable_log', type=bool, default=False)
     args = parser.parse_args()
 

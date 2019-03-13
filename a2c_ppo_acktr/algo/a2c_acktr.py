@@ -11,8 +11,9 @@ class A2C_ACKTR():
                  value_loss_coef,
                  entropy_coef,
                  lr=None,
-                 lr_beta=None,
-                 reg_beta=None,
+                 lr_filter=None,
+                 reg_filter=None,
+                 filter_mem=None,
                  eps=None,
                  alpha=None,
                  max_grad_norm=None,
@@ -29,29 +30,32 @@ class A2C_ACKTR():
         if acktr:
             self.optimizer = KFACOptimizer(actor_critic)
 
-        self.beta_value_list = []
+        self.filter_list = []
         self.param_list = []
         for name, param in actor_critic.named_parameters():
-            if "base.beta_value_net" in name :
-                self.beta_value_list.append(param)
+            if "base.filter_net" in name :
+                self.filter_list.append(param)
             else:
                 self.param_list.append(param)
 
         else:
             self.optimizer = optim.RMSprop([{'params': self.param_list},
-                 {'params': self.beta_value_list, 'lr': lr_beta, 'weight_decay':reg_beta}], lr, eps=eps, alpha=alpha)
+                 {'params': self.filter_list, 'lr': lr_filter, 'weight_decay':reg_filter}], lr, eps=eps, alpha=alpha)
 
-    def update(self, rollouts, eval_prev_value):
+    def update(self, rollouts, value_prev_eval, filter_mem_latent_eval, filter_type):
         obs_shape = rollouts.obs.size()[2:]
         action_shape = rollouts.actions.size()[-1]
         num_steps, num_processes, _ = rollouts.rewards.size()
 
-        values, action_log_probs, dist_entropy, _ , eval_prev_value = self.actor_critic.evaluate_actions(
+        values, action_log_probs, dist_entropy, _ , value_prev_eval, filter_mem_latent_eval, att_list = self.actor_critic.evaluate_actions(
             rollouts.obs[:-1],
             rollouts.recurrent_hidden_states[0],
             rollouts.masks[:-1],
             rollouts.actions,
-            eval_prev_value=eval_prev_value)
+            rollouts.latent_target[:-1],
+            value_prev_eval=value_prev_eval,
+            filter_mem_latent_eval = filter_mem_latent_eval,
+            filter_type=filter_type)
 
         values = values.view(num_steps, num_processes, 1)
         action_log_probs = action_log_probs.view(num_steps, num_processes, 1)
@@ -88,4 +92,4 @@ class A2C_ACKTR():
 
         self.optimizer.step()
 
-        return value_loss.item(), action_loss.item(), dist_entropy.item(), eval_prev_value
+        return value_loss.item(), action_loss.item(), dist_entropy.item(), value_prev_eval, filter_mem_latent_eval, att_list

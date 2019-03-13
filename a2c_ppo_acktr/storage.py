@@ -7,8 +7,14 @@ def _flatten_helper(T, N, _tensor):
 
 
 class RolloutStorage(object):
-    def __init__(self, num_steps, num_processes, obs_shape, action_space, recurrent_hidden_state_size):
+    def __init__(self, num_steps, num_processes, obs_shape, latent_shape, value_shape, action_space, recurrent_hidden_state_size):
         self.obs = torch.zeros(num_steps + 1, num_processes, *obs_shape)
+
+        self.latent = torch.zeros(num_steps + 1, num_processes, *latent_shape)
+        self.value_prev = torch.zeros(num_steps + 1, num_processes, *value_shape)
+        self.latent_pred = torch.zeros(num_steps + 1, num_processes, latent_shape[0])
+        self.latent_target = torch.zeros(num_steps + 1, num_processes, latent_shape[0])
+
         self.recurrent_hidden_states = torch.zeros(num_steps + 1, num_processes, recurrent_hidden_state_size)
         self.rewards = torch.zeros(num_steps, num_processes, 1)
         self.value_preds = torch.zeros(num_steps + 1, num_processes, 1)
@@ -28,6 +34,10 @@ class RolloutStorage(object):
 
     def to(self, device):
         self.obs = self.obs.to(device)
+        self.latent = self.latent.to(device)
+        self.value_prev = self.value_prev.to(device)
+        self.latent_pred = self.latent_pred.to(device)
+        self.latent_target = self.latent_target.to(device)
         self.recurrent_hidden_states = self.recurrent_hidden_states.to(device)
         self.rewards = self.rewards.to(device)
         self.value_preds = self.value_preds.to(device)
@@ -36,8 +46,10 @@ class RolloutStorage(object):
         self.actions = self.actions.to(device)
         self.masks = self.masks.to(device)
 
-    def insert(self, obs, recurrent_hidden_states, actions, action_log_probs, value_preds, rewards, masks):
+    def insert(self, obs, latent, value_list, recurrent_hidden_states, actions, action_log_probs, value_preds, rewards, masks):
         self.obs[self.step + 1].copy_(obs)
+        self.latent[self.step + 1].copy_(latent)
+        self.value_prev[self.step + 1].copy_(value_list)
         self.recurrent_hidden_states[self.step + 1].copy_(recurrent_hidden_states)
         self.actions[self.step].copy_(actions)
         self.action_log_probs[self.step].copy_(action_log_probs)
@@ -51,8 +63,11 @@ class RolloutStorage(object):
         self.obs[0].copy_(self.obs[-1])
         self.recurrent_hidden_states[0].copy_(self.recurrent_hidden_states[-1])
         self.masks[0].copy_(self.masks[-1])
+        self.latent[0].copy_(self.latent[-1])
+        self.latent_target[0].copy_(self.latent_target[-1])
+        self.value_prev.copy_(self.value_prev[-1])
 
-    def compute_returns(self, next_value, use_gae, gamma, tau):
+    def compute_returns(self, next_value, next_latent, use_gae, gamma, tau):
         if use_gae:
             self.value_preds[-1] = next_value
             gae = 0
@@ -60,11 +75,22 @@ class RolloutStorage(object):
                 delta = self.rewards[step] + gamma * self.value_preds[step + 1] * self.masks[step + 1] - self.value_preds[step]
                 gae = delta + gamma * tau * self.masks[step + 1] * gae
                 self.returns[step] = gae + self.value_preds[step]
+
+            self.latent_pred[-1] = next_latent
+            gae_latent = 0
+            for step in reversed(range(self.latent_target.size(0))):
+                delta = gamma * self.latent_pred[step + 1] * self.masks[step + 1] - self.latent_pred[step]
+                gae = delta + gamma * tau * self.masks[step + 1] * gae
+                self.latent_target[step] = gae + self.latent_target[step]
+ 
         else:
             self.returns[-1] = next_value
             for step in reversed(range(self.rewards.size(0))):
                 self.returns[step] = self.returns[step + 1] * \
                     gamma * self.masks[step + 1] + self.rewards[step]
+
+            for step in range(self.latent_target.size(0)):
+                self.latent_target[step] = next_latent[step]
 
 
     def feed_forward_generator(self, advantages, num_mini_batch):

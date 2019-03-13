@@ -51,9 +51,12 @@ class Policy(nn.Module):
     def forward(self, inputs, rnn_hxs, masks):
         raise NotImplementedError
 
-    def act(self, inputs, rnn_hxs, masks, deterministic=False, prev_value=None):
-        value, actor_features, rnn_hxs, beta_value = self.base(inputs, rnn_hxs, masks)
+    def act(self, inputs, rnn_hxs, masks, deterministic=False, filter_mem_latent=None, value_prev=None, filter_type=None):
+        value, actor_features, rnn_hxs, filter_latent = self.base(inputs, rnn_hxs, masks)
         dist = self.dist(actor_features)
+
+        filter_mem_latent.append(filter_latent[:])
+        value_prev.append(value[:])
 
         if deterministic:
             action = dist.mode()
@@ -63,43 +66,47 @@ class Policy(nn.Module):
         action_log_probs = dist.log_probs(action)
         dist_entropy = dist.entropy().mean()
 
-        if prev_value is not None:
-            value = beta_value * value + (1 - beta_value) * prev_value
-
-        prev_value = value * masks
-
-        return value, action, action_log_probs, rnn_hxs, prev_value, beta_value
+        return value, action, action_log_probs, rnn_hxs, filter_mem_latent, value_prev
 
     def get_value(self, inputs, rnn_hxs, masks):
-        value, _, _, _ = self.base(inputs, rnn_hxs, masks)
-        return value
+        value, _, _, next_latent = self.base(inputs, rnn_hxs, masks)
+        return value, next_latent
 
-    def evaluate_actions(self, inputs, rnn_hxs, masks, action, eval_prev_value=None):
+    def evaluate_actions(self, inputs, rnn_hxs, masks, action, latent_target, value_prev_eval=None, filter_mem_latent_eval=None, filter_type=None):
+
         value_list = []
         action_log_probs = []
         dist_entropy = []
+        att_list = []
 
         for i in range(inputs.size()[0]):
-            value, actor_features, _, beta_value = self.base(inputs[i,:,:], rnn_hxs, masks[i,:,:])
-            
-            if eval_prev_value is not None:
-                value = beta_value * value + (1 - beta_value) * eval_prev_value
+            value, actor_features, _, filter_latent = self.base(inputs[i,:,:], rnn_hxs, masks[i,:,:])
 
-            value_list.append(value)
+            value_prev_eval.append(value[:])
+            filter_mem_latent_eval.append(filter_latent[:])
 
-            eval_prev_value = value * masks[i,:,:]
+            value_prev_eval_torch = torch.stack(list(value_prev_eval)).permute(1,2,0)
+            filter_mem_latent_eval_torch = torch.stack(list(filter_mem_latent_eval)).permute(1,2,0)
 
+            value_list_p = []
+            for latent_curr_p, filter_latent_p, value_eval_p in zip(latent_target[i,:,:], filter_mem_latent_eval_torch, value_prev_eval_torch):
+                attention_param = F.softmax(torch.matmul(latent_curr_p, filter_latent_p), dim=0)
+                att_list.append(attention_param.detach())
+                value_curr_p = torch.matmul(attention_param, value_eval_p.squeeze(0))
+                value_list_p.append(value_curr_p)
+
+            value = torch.stack(value_list_p)
             dist = self.dist(actor_features)
 
+            value_list.append(value)
             action_log_probs.append(dist.log_probs(action[i,:,:]))
             dist_entropy.append(dist.entropy())
-
 
         action_log_probs = torch.stack(action_log_probs)
         dist_entropy = torch.stack(dist_entropy).mean()
         v = torch.stack(value_list)
 
-        return v, action_log_probs, dist_entropy, rnn_hxs, eval_prev_value
+        return v, action_log_probs, dist_entropy, rnn_hxs, value_prev_eval, filter_mem_latent_eval, att_list
 
 
 class NNBase(nn.Module):
@@ -194,10 +201,11 @@ class NNBase(nn.Module):
 
 
 class CNNBase(NNBase):
-    def __init__(self, num_inputs, recurrent=False, hidden_size=512, est_beta_value=False):
+    def __init__(self, num_inputs, recurrent=False, hidden_size=512, est_filter=False, filter_mem=1):
         super(CNNBase, self).__init__(recurrent, hidden_size, hidden_size)
 
-        self.est_beta_value = est_beta_value
+        self.est_filter = est_filter
+        self.filter_mem = filter_mem
 
         init_ = lambda m: init(m,
             nn.init.orthogonal_,
@@ -222,8 +230,6 @@ class CNNBase(NNBase):
 
         self.critic_linear = init_(nn.Linear(hidden_size, 1))
 
-        self.beta_value_net = nn.Sequential(init_(nn.Linear(hidden_size, 1)), nn.Sigmoid())
-
         self.train()
 
     def forward(self, inputs, rnn_hxs, masks):
@@ -232,19 +238,20 @@ class CNNBase(NNBase):
         if self.is_recurrent:
             x, rnn_hxs = self._forward_gru(x, rnn_hxs, masks)
 
-        if self.est_beta_value:
-            beta_value = self.beta_value_net(x)
+        if self.est_filter:
+            filter_memory.append(x)
         else:
-            beta_value = torch.ones_like(masks)
+            filter_value = torch.ones_like(masks)
 
-        return self.critic_linear(x), x, rnn_hxs, beta_value
+        return self.critic_linear(x), x, rnn_hxs, filter_value
 
 
 class MLPBase(NNBase):
-    def __init__(self, num_inputs, recurrent=False, hidden_size=64, est_beta_value=False):
+    def __init__(self, num_inputs, recurrent=False, hidden_size=64, est_filter=False, filter_mem=1):
         super(MLPBase, self).__init__(recurrent, num_inputs, hidden_size)
 
-        self.est_beta_value = est_beta_value
+        self.est_filter = est_filter
+        self.filter_mem = filter_mem
 
         if recurrent:
             num_inputs = hidden_size
@@ -268,7 +275,7 @@ class MLPBase(NNBase):
             nn.Tanh()
         )
 
-        self.beta_value_net = nn.Sequential(init_(nn.Linear(hidden_size, 1)), nn.Sigmoid())
+        #self.filter_net = nn.Sequential(init_(nn.Linear(hidden_size, self.filter_mem)), nn.Softmax(dim=1))
 
         self.critic_linear = init_(nn.Linear(hidden_size, 1))
 
@@ -285,9 +292,11 @@ class MLPBase(NNBase):
         hidden_critic = self.critic(x)
         hidden_actor = self.actor(x)
 
-        if self.est_beta_value:
-            beta_value = self.beta_value_net(hidden_critic)
+        '''
+        if self.est_filter:
+            filter_value = self.filter_net(hidden_critic)
         else:
-            beta_value = torch.ones_like(masks)
+            filter_value = torch.ones_like(masks)
+        '''
 
-        return self.critic_linear(hidden_critic), hidden_actor, rnn_hxs, beta_value
+        return self.critic_linear(hidden_critic), hidden_actor, rnn_hxs, hidden_critic

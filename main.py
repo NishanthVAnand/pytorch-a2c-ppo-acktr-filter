@@ -21,6 +21,7 @@ from a2c_ppo_acktr.storage import RolloutStorage
 from a2c_ppo_acktr.utils import get_vec_normalize, update_linear_schedule
 from a2c_ppo_acktr.visualize import visdom_plot
 
+import collections
 
 args = get_args()
 
@@ -30,7 +31,7 @@ if args.recurrent_policy:
         'Recurrent policy is not implemented for ACKTR'
 
 experiment = Experiment(api_key="tSACzCGFcetSBTapGBKETFARf",
-                        project_name="recurrent-value", workspace="nishanthvanand",disabled=args.disable_log)
+                        project_name="recurrent-filter", workspace="nishanthvanand",disabled=args.disable_log)
 
 num_updates = int(args.num_env_steps) // args.num_steps // args.num_processes
 
@@ -71,13 +72,23 @@ def main():
                         args.gamma, args.log_dir, args.add_timestep, device, False)
 
     actor_critic = Policy(envs.observation_space.shape, envs.action_space,
-        base_kwargs={'recurrent': args.recurrent_policy, 'est_beta_value':args.est_beta_value})
+        base_kwargs={'recurrent': args.recurrent_policy, 'est_filter':args.est_filter, 'filter_mem':args.filter_memory})
     actor_critic.to(device)
+
+    '''
+    passing the size of latent representation here
+    '''
+    if len(envs.observation_space.shape)==3:
+        hidden_size = 512
+    elif len(envs.observation_space.shape)==1:
+        hidden_size = 64
+    else:
+        NotImplementedError
 
     if args.algo == 'a2c':
         agent = algo.A2C_ACKTR(actor_critic, args.value_loss_coef,
                                args.entropy_coef, lr=args.lr,
-                               lr_beta=args.lr_beta, reg_beta=args.reg_beta,
+                               lr_filter=args.lr_filter, reg_filter=args.reg_filter, filter_mem=args.filter_memory,
                                eps=args.eps, alpha=args.alpha,
                                max_grad_norm=args.max_grad_norm)
     elif args.algo == 'ppo':
@@ -90,7 +101,9 @@ def main():
                                args.entropy_coef, acktr=True)
 
     rollouts = RolloutStorage(args.num_steps, args.num_processes,
-                        envs.observation_space.shape, envs.action_space,
+                        envs.observation_space.shape,
+                        (hidden_size, args.filter_memory), (1, args.filter_memory),
+                        envs.action_space,
                         actor_critic.recurrent_hidden_state_size)
 
     obs = envs.reset()
@@ -102,9 +115,16 @@ def main():
     start = time.time()
 
     for j in range(num_updates):
-        beta_value_list = []
-        prev_value = None
-        eval_prev_value = None
+        filter_coeff_list = []
+    
+        value_prev = collections.deque([torch.zeros(args.num_processes, 1) for i in range(args.filter_memory)], maxlen=args.filter_memory)
+        value_prev_eval = collections.deque([torch.zeros(args.num_processes, 1) for i in range(args.filter_memory)], maxlen=args.filter_memory)
+
+        filter_mem_latent = collections.deque([torch.zeros(args.num_processes, hidden_size) for i in range(args.filter_memory)], maxlen=args.filter_memory)
+        filter_mem_latent_eval = collections.deque([torch.zeros(args.num_processes, hidden_size) for i in range(args.filter_memory)], maxlen=args.filter_memory)
+
+        if args.filter_type == "IIR":
+            raise NotImplementedError
 
         if args.use_linear_lr_decay:
             # decrease learning rate linearly
@@ -120,19 +140,16 @@ def main():
         for step in range(args.num_steps):
             # Sample actions
             with torch.no_grad():
-                value, action, action_log_prob, recurrent_hidden_states, prev_value, beta_value = actor_critic.act(
+                value, action, action_log_prob, recurrent_hidden_states, filter_mem_latent, value_prev = actor_critic.act(
                         rollouts.obs[step],
                         rollouts.recurrent_hidden_states[step],
                         rollouts.masks[step],
-                        prev_value=prev_value)
+                        filter_mem_latent = filter_mem_latent,
+                        value_prev=value_prev,
+                        filter_type=args.filter_type)
 
             # Obser reward and next obs
             obs, reward, done, infos = envs.step(action)
-
-            if not args.cuda:
-                beta_value_list.append(beta_value.numpy())
-            else:
-                beta_value_list.append(beta_value.cpu().numpy())
 
             for info in infos:
                 if 'episode' in info.keys():
@@ -141,17 +158,22 @@ def main():
             # If done then clean the history of observations.
             masks = torch.FloatTensor([[0.0] if done_ else [1.0]
                                        for done_ in done])
-            rollouts.insert(obs, recurrent_hidden_states, action, action_log_prob, value, reward, masks)
+
+            rollouts.insert(obs, torch.stack(list(filter_mem_latent)).reshape(args.num_processes, hidden_size, args.filter_memory), 
+                torch.stack(list(value_prev)).reshape(args.num_processes, 1, args.filter_memory), recurrent_hidden_states, action, action_log_prob, value, reward, masks)
 
         with torch.no_grad():
-            next_value = actor_critic.get_value(rollouts.obs[-1],
+            next_value, next_latent = actor_critic.get_value(rollouts.obs[-1],
                                                 rollouts.recurrent_hidden_states[-1],
-                                                rollouts.masks[-1]).detach()
+                                                rollouts.masks[-1])
+        next_value = next_value.detach()
+        next_latent = next_latent.detach()
 
-        rollouts.compute_returns(next_value, args.use_gae, args.gamma, args.tau)
+        rollouts.compute_returns(next_value, next_latent, args.use_gae, args.gamma, args.tau)
 
-        value_loss, action_loss, dist_entropy, eval_prev_value = agent.update(rollouts, eval_prev_value)
+        value_loss, action_loss, dist_entropy, value_prev_eval, filter_mem_latent_eval, att_list = agent.update(rollouts, value_prev_eval, filter_mem_latent_eval, filter_type=args.filter_type)
 
+        filter_coeff_list.append(att_list)
         rollouts.after_update()
 
         # save for every interval-th episode or for the last epoch
@@ -170,7 +192,7 @@ def main():
             save_model = [save_model,
                           getattr(get_vec_normalize(envs), 'ob_rms', None)]
 
-            if args.est_beta_value:
+            if args.est_filter:
                 torch.save(save_model, os.path.join(save_path, args.env_name +"_seed_"+str(args.seed) + "_beta_est.pt"))
             else:
                 torch.save(save_model, os.path.join(save_path, args.env_name +"_seed_"+str(args.seed) + "_no_beta.pt"))
@@ -189,10 +211,31 @@ def main():
                        np.max(episode_rewards), dist_entropy,
                        value_loss, action_loss))
 
+            filter_coeff_mean = {"coeff_"+str(i):0 for i in range(args.filter_memory)}
+            filter_coeff_std = {"coeff_"+str(i):0 for i in range(args.filter_memory)}
+
+            filter_list = []
+            for batches in range(len(filter_coeff_list)):
+                for item in range(len(filter_coeff_list[batches])):
+                    if not args.cuda:
+                        filter_np = filter_coeff_list[batches][item].numpy()
+                    else:
+                        filter_np = filter_coeff_list[batches][item].append(beta_value.cpu().numpy())
+                    filter_list.append(filter_np)
+            filter_numpy = np.array(filter_list)
+            filter_mean = filter_numpy.mean(0)
+            filter_std = filter_numpy.std(0)
+
+            for idx, (m,s) in enumerate(zip(filter_mean, filter_std)):
+                filter_coeff_mean[idx] = m
+                filter_coeff_std[idx] = s
+
             experiment.log_metrics({"mean reward": np.mean(episode_rewards),
-                                 "Value loss": value_loss, "Action Loss": action_loss,"Beta mean": np.array(beta_value_list).mean(),
-                                 "Beta std": np.array(beta_value_list).std()}, 
+                                 "Value loss": value_loss, "Action Loss": action_loss},
                                  step=j * args.num_steps * args.num_processes)
+
+            experiment.log_metrics(filter_coeff_mean, step=j * args.num_steps * args.num_processes)
+            experiment.log_metrics(filter_coeff_std, step=j * args.num_steps * args.num_processes)
 
         if (args.eval_interval is not None
                 and len(episode_rewards) > 1
