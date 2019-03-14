@@ -117,11 +117,11 @@ def main():
     for j in range(num_updates):
         filter_coeff_list = []
     
-        value_prev = collections.deque([torch.zeros(args.num_processes, 1) for i in range(args.filter_memory)], maxlen=args.filter_memory)
-        value_prev_eval = collections.deque([torch.zeros(args.num_processes, 1) for i in range(args.filter_memory)], maxlen=args.filter_memory)
+        value_prev = collections.deque([torch.zeros(args.num_processes, 1).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
+        value_prev_eval = collections.deque([torch.zeros(args.num_processes, 1).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
 
-        filter_mem_latent = collections.deque([torch.zeros(args.num_processes, hidden_size) for i in range(args.filter_memory)], maxlen=args.filter_memory)
-        filter_mem_latent_eval = collections.deque([torch.zeros(args.num_processes, hidden_size) for i in range(args.filter_memory)], maxlen=args.filter_memory)
+        filter_mem_latent = collections.deque([torch.zeros(args.num_processes, hidden_size).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
+        filter_mem_latent_eval = collections.deque([torch.zeros(args.num_processes, hidden_size).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
 
         if args.filter_type == "IIR":
             raise NotImplementedError
