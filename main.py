@@ -220,7 +220,7 @@ def main():
                     if not args.cuda:
                         filter_np = filter_coeff_list[batches][item].numpy()
                     else:
-                        filter_np = filter_coeff_list[batches][item].append(beta_value.cpu().numpy())
+                        filter_np = filter_coeff_list[batches][item].cpu().numpy()
                     filter_list.append(filter_np)
             filter_numpy = np.array(filter_list)
             filter_mean = filter_numpy.mean(0)
