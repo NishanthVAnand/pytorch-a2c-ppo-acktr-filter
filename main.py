@@ -227,8 +227,8 @@ def main():
             filter_std = filter_numpy.std(0)
 
             for idx, (m,s) in enumerate(zip(filter_mean, filter_std)):
-                filter_coeff_mean[idx] = m
-                filter_coeff_std[idx] = s
+                filter_coeff_mean["coeff_"+str(idx)] = m
+                filter_coeff_std["coeff_"+str(idx)] = s
 
             experiment.log_metrics({"mean reward": np.mean(episode_rewards),
                                  "Value loss": value_loss, "Action Loss": action_loss},
