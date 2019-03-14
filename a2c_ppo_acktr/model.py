@@ -238,12 +238,14 @@ class CNNBase(NNBase):
         if self.is_recurrent:
             x, rnn_hxs = self._forward_gru(x, rnn_hxs, masks)
 
+        '''
         if self.est_filter:
             filter_memory.append(x)
         else:
             filter_value = torch.ones_like(masks)
+        '''
 
-        return self.critic_linear(x), x, rnn_hxs, filter_value
+        return self.critic_linear(x), x, rnn_hxs, x
 
 
 class MLPBase(NNBase):
