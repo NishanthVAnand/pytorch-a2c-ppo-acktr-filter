@@ -31,7 +31,10 @@ if args.recurrent_policy:
         'Recurrent policy is not implemented for ACKTR'
 
 experiment = Experiment(api_key="tSACzCGFcetSBTapGBKETFARf",
-                        project_name="recurrent-filter", workspace="nishanthvanand",disabled=args.disable_log)
+                        project_name="recurrent-filter", workspace="nishanthvanand",disabled=args.disable_log,
+                        parse_args=False)
+
+experiment.log_parameters(vars(args))
 
 num_updates = int(args.num_env_steps) // args.num_steps // args.num_processes
 
