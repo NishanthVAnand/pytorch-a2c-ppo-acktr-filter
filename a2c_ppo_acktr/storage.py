@@ -49,6 +49,7 @@ class RolloutStorage(object):
     def insert(self, obs, latent, value_list, recurrent_hidden_states, actions, action_log_probs, value_preds, rewards, masks):
         self.obs[self.step + 1].copy_(obs)
         self.latent[self.step + 1].copy_(latent)
+        self.latent_target[self.step].copy_(latent)
         self.value_prev[self.step + 1].copy_(value_list)
         self.recurrent_hidden_states[self.step + 1].copy_(recurrent_hidden_states)
         self.actions[self.step].copy_(actions)
@@ -75,23 +76,12 @@ class RolloutStorage(object):
                 delta = self.rewards[step] + gamma * self.value_preds[step + 1] * self.masks[step + 1] - self.value_preds[step]
                 gae = delta + gamma * tau * self.masks[step + 1] * gae
                 self.returns[step] = gae + self.value_preds[step]
-
-            self.latent_pred[-1] = next_latent
-            gae_latent = 0
-            for step in reversed(range(self.latent_target.size(0))):
-                delta = gamma * self.latent_pred[step + 1] * self.masks[step + 1] - self.latent_pred[step]
-                gae = delta + gamma * tau * self.masks[step + 1] * gae
-                self.latent_target[step] = gae + self.latent_target[step]
  
         else:
             self.returns[-1] = next_value
             for step in reversed(range(self.rewards.size(0))):
                 self.returns[step] = self.returns[step + 1] * \
                     gamma * self.masks[step + 1] + self.rewards[step]
-
-            for step in range(self.latent_target.size(0)):
-                self.latent_target[step] = next_latent[step]
-
 
     def feed_forward_generator(self, advantages, num_mini_batch):
         num_steps, num_processes = self.rewards.size()[0:2]
