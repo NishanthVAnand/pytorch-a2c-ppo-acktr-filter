@@ -51,12 +51,11 @@ class Policy(nn.Module):
     def forward(self, inputs, rnn_hxs, masks):
         raise NotImplementedError
 
-    def act(self, inputs, rnn_hxs, masks, deterministic=False, filter_mem_latent=None, value_prev=None, filter_type=None):
+    def act(self, inputs, rnn_hxs, masks, deterministic=False, value_prev=None, filter_type=None):
         value, actor_features, rnn_hxs, filter_latent = self.base(inputs, rnn_hxs, masks)
         dist = self.dist(actor_features)
 
-        filter_mem_latent.append(filter_latent[:])
-        value_prev.append(value[:])
+        #value_prev.append(value[:])
 
         if deterministic:
             action = dist.mode()
@@ -66,7 +65,7 @@ class Policy(nn.Module):
         action_log_probs = dist.log_probs(action)
         dist_entropy = dist.entropy().mean()
 
-        return value, action, action_log_probs, rnn_hxs, filter_mem_latent, value_prev
+        return value, action, action_log_probs, rnn_hxs
 
     def get_value(self, inputs, rnn_hxs, masks):
         value, _, _, next_latent = self.base(inputs, rnn_hxs, masks)
@@ -77,7 +76,6 @@ class Policy(nn.Module):
         value_list = []
         action_log_probs = []
         dist_entropy = []
-        att_list = []
 
         for i in range(inputs.size()[0]):
             value, actor_features, _, filter_latent = self.base(inputs[i,:,:], rnn_hxs, masks[i,:,:])
@@ -85,20 +83,15 @@ class Policy(nn.Module):
             value_prev_eval.append(value[:])
             filter_mem_latent_eval.append(filter_latent[:])
 
-            value_prev_eval_torch = torch.stack(list(value_prev_eval)).permute(1,2,0)
-            filter_mem_latent_eval_torch = torch.stack(list(filter_mem_latent_eval)).permute(1,2,0)
+            value_prev_eval_torch = torch.stack(list(value_prev_eval)).squeeze(2)
+            filter_mem_latent_eval_torch = torch.stack(list(filter_mem_latent_eval))
 
-            value_list_p = []
-            for latent_curr_p, filter_latent_p, value_eval_p in zip(latent_target[i,:,:], filter_mem_latent_eval_torch, value_prev_eval_torch):
-                attention_param = F.softmax(torch.matmul(latent_curr_p, filter_latent_p), dim=0)
-                att_list.append(attention_param.detach())
-                value_curr_p = torch.matmul(attention_param, value_eval_p.squeeze(0))
-                value_list_p.append(value_curr_p)
+            attention_param = F.softmax(torch.einsum('abc,bc -> ab', filter_mem_latent_eval_torch, latent_target), dim=0)
+            value_curr_p = torch.sum(attention_param * value_prev_eval_torch, dim=0)
 
-            value = torch.stack(value_list_p)
             dist = self.dist(actor_features)
 
-            value_list.append(value)
+            value_list.append(value_curr_p)
             action_log_probs.append(dist.log_probs(action[i,:,:]))
             dist_entropy.append(dist.entropy())
 
@@ -106,7 +99,7 @@ class Policy(nn.Module):
         dist_entropy = torch.stack(dist_entropy).mean()
         v = torch.stack(value_list)
 
-        return v, action_log_probs, dist_entropy, rnn_hxs, value_prev_eval, filter_mem_latent_eval, att_list
+        return v, action_log_probs, dist_entropy, rnn_hxs, value_prev_eval, filter_mem_latent_eval, attention_param.detach()
 
 
 class NNBase(nn.Module):

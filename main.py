@@ -105,7 +105,7 @@ def main():
 
     rollouts = RolloutStorage(args.num_steps, args.num_processes,
                         envs.observation_space.shape,
-                        (hidden_size, args.filter_memory), (1, args.filter_memory),
+                        hidden_size, (1, args.filter_memory),
                         envs.action_space,
                         actor_critic.recurrent_hidden_state_size)
 
@@ -117,13 +117,14 @@ def main():
 
     start = time.time()
 
+    filter_coeff_list = []
+
     for j in range(num_updates):
-        filter_coeff_list = []
     
         value_prev = collections.deque([torch.zeros(args.num_processes, 1).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
         value_prev_eval = collections.deque([torch.zeros(args.num_processes, 1).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
 
-        filter_mem_latent = collections.deque([torch.zeros(args.num_processes, hidden_size).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
+        #filter_mem_latent = collections.deque([torch.zeros(args.num_processes, hidden_size).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
         filter_mem_latent_eval = collections.deque([torch.zeros(args.num_processes, hidden_size).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
 
         if args.filter_type == "IIR":
@@ -143,11 +144,10 @@ def main():
         for step in range(args.num_steps):
             # Sample actions
             with torch.no_grad():
-                value, action, action_log_prob, recurrent_hidden_states, filter_mem_latent, value_prev = actor_critic.act(
+                value, action, action_log_prob, recurrent_hidden_states = actor_critic.act(
                         rollouts.obs[step],
                         rollouts.recurrent_hidden_states[step],
                         rollouts.masks[step],
-                        filter_mem_latent = filter_mem_latent,
                         value_prev=value_prev,
                         filter_type=args.filter_type)
 
@@ -162,13 +162,13 @@ def main():
             masks = torch.FloatTensor([[0.0] if done_ else [1.0]
                                        for done_ in done])
 
-            rollouts.insert(obs, torch.stack(list(filter_mem_latent)).reshape(args.num_processes, hidden_size, args.filter_memory), 
-                torch.stack(list(value_prev)).reshape(args.num_processes, 1, args.filter_memory), recurrent_hidden_states, action, action_log_prob, value, reward, masks)
+            rollouts.insert(obs, recurrent_hidden_states, action, action_log_prob, value, reward, masks)
 
         with torch.no_grad():
             next_value, next_latent = actor_critic.get_value(rollouts.obs[-1],
                                                 rollouts.recurrent_hidden_states[-1],
                                                 rollouts.masks[-1])
+
         next_value = next_value.detach()
         next_latent = next_latent.detach()
 
@@ -214,24 +214,23 @@ def main():
                        np.max(episode_rewards), dist_entropy,
                        value_loss, action_loss))
 
-            filter_coeff_mean = {"coeff_"+str(i):0 for i in range(args.filter_memory)}
-            filter_coeff_std = {"coeff_"+str(i):0 for i in range(args.filter_memory)}
+            filter_coeff_mean = {"coeff_mean_"+str(i):0 for i in range(args.filter_memory)}
+            filter_coeff_std = {"coeff_std_"+str(i):0 for i in range(args.filter_memory)}
 
             filter_list = []
             for batches in range(len(filter_coeff_list)):
-                for item in range(len(filter_coeff_list[batches])):
                     if not args.cuda:
-                        filter_np = filter_coeff_list[batches][item].numpy()
+                        filter_np = filter_coeff_list[batches].numpy()
                     else:
-                        filter_np = filter_coeff_list[batches][item].cpu().numpy()
-                    filter_list.append(filter_np)
+                        filter_np = filter_coeff_list[batches].cpu().numpy()
+                    filter_list.append(filter_np.mean(1).ravel())
             filter_numpy = np.array(filter_list)
             filter_mean = filter_numpy.mean(0)
             filter_std = filter_numpy.std(0)
 
             for idx, (m,s) in enumerate(zip(filter_mean, filter_std)):
-                filter_coeff_mean["coeff_"+str(idx)] = m
-                filter_coeff_std["coeff_"+str(idx)] = s
+                filter_coeff_mean["coeff_mean_"+str(idx)] = m
+                filter_coeff_std["coeff_std_"+str(idx)] = s
 
             experiment.log_metrics({"mean reward": np.mean(episode_rewards),
                                  "Value loss": value_loss, "Action Loss": action_loss},
@@ -239,6 +238,8 @@ def main():
 
             experiment.log_metrics(filter_coeff_mean, step=j * args.num_steps * args.num_processes)
             experiment.log_metrics(filter_coeff_std, step=j * args.num_steps * args.num_processes)
+
+            del filter_coeff_list[:]
 
         if (args.eval_interval is not None
                 and len(episode_rewards) > 1

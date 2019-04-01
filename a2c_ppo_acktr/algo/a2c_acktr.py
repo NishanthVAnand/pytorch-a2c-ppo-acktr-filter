@@ -52,7 +52,7 @@ class A2C_ACKTR():
             rollouts.recurrent_hidden_states[0],
             rollouts.masks[:-1],
             rollouts.actions,
-            rollouts.latent_target[:-1],
+            rollouts.att_target,
             value_prev_eval=value_prev_eval,
             filter_mem_latent_eval = filter_mem_latent_eval,
             filter_type=filter_type)
