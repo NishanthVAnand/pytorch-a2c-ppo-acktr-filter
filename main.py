@@ -1,4 +1,4 @@
-from comet_ml import Experiment
+from comet_ml import Experiment, OfflineExperiment
 
 import copy
 import glob
