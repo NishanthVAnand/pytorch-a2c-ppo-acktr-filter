@@ -30,7 +30,14 @@ if args.recurrent_policy:
     assert args.algo in ['a2c', 'ppo'], \
         'Recurrent policy is not implemented for ACKTR'
 
-experiment = Experiment(api_key="tSACzCGFcetSBTapGBKETFARf",
+
+
+if args.comet == "offline":
+    experiment = OfflineExperiment(project_name="recurrent-filter", workspace="nishanthvanand",
+    disabled=args.disable_log, offline_directory="/scratch/nish127/comet_offline",
+    parse_args=False)
+elif args.comet == "online":
+    experiment = experiment = Experiment(api_key="tSACzCGFcetSBTapGBKETFARf",
                         project_name="recurrent-filter", workspace="nishanthvanand",disabled=args.disable_log,
                         parse_args=False)
 
