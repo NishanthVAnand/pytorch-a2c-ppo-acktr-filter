@@ -76,6 +76,7 @@ def get_args():
     parser.add_argument('--lr_filter', type=float, default=1e-4)
     parser.add_argument('--reg_filter', type=float, default=0.)
     parser.add_argument('--num-frame-stack', type=int, default=4)
+    parser.add_argument('--comet', type=str, default="online")
 
     parser.add_argument('--disable_log', type=bool, default=False)
     args = parser.parse_args()
