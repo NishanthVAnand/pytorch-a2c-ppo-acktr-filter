@@ -78,18 +78,21 @@ def main():
         viz = Visdom(port=args.port)
         win = None
 
-    envs = make_vec_envs(args.env_name, args.seed, args.num_processes,
+    envs, is_minigrid = make_vec_envs(args.env_name, args.seed, args.num_processes,
                         args.gamma, args.log_dir, args.add_timestep, device, False, args.num_frame_stack)
 
     actor_critic = Policy(envs.observation_space.shape, envs.action_space,
-        base_kwargs={'recurrent': args.recurrent_policy, 'est_filter':args.est_filter, 'filter_mem':args.filter_memory})
+        base_kwargs={'recurrent': args.recurrent_policy, 'filter_mem':args.filter_memory},
+        is_minigrid=is_minigrid)
     actor_critic.to(device)
 
     '''
     passing the size of latent representation here
     '''
-    if len(envs.observation_space.shape)==3:
+    if len(envs.observation_space.shape)==3 and not is_minigrid:
         hidden_size = 512
+    if len(envs.observation_space.shape)==3 and is_minigrid:
+        hidden_size = 64
     elif len(envs.observation_space.shape)==1:
         hidden_size = 64
     else:
@@ -97,8 +100,7 @@ def main():
 
     if args.algo == 'a2c':
         agent = algo.A2C_ACKTR(actor_critic, args.value_loss_coef,
-                               args.entropy_coef, lr=args.lr,
-                               lr_filter=args.lr_filter, reg_filter=args.reg_filter, filter_mem=args.filter_memory,
+                               args.entropy_coef, lr=args.lr, filter_mem=args.filter_memory,
                                eps=args.eps, alpha=args.alpha,
                                max_grad_norm=args.max_grad_norm)
     elif args.algo == 'ppo':
@@ -202,10 +204,7 @@ def main():
             save_model = [save_model,
                           getattr(get_vec_normalize(envs), 'ob_rms', None)]
 
-            if args.est_filter:
-                torch.save(save_model, os.path.join(save_path, args.env_name +"_seed_"+str(args.seed) + "_beta_est.pt"))
-            else:
-                torch.save(save_model, os.path.join(save_path, args.env_name +"_seed_"+str(args.seed) + "_no_beta.pt"))
+            torch.save(save_model, os.path.join(save_path, args.env_name +"_seed_"+str(args.seed) + "num_filter_" + str(args.filter_memory) + ".pt"))
 
         total_num_steps = (j + 1) * args.num_processes * args.num_steps
 

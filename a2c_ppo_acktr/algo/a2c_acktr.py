@@ -11,8 +11,6 @@ class A2C_ACKTR():
                  value_loss_coef,
                  entropy_coef,
                  lr=None,
-                 lr_filter=None,
-                 reg_filter=None,
                  filter_mem=None,
                  eps=None,
                  alpha=None,
@@ -40,7 +38,7 @@ class A2C_ACKTR():
 
         else:
             self.optimizer = optim.RMSprop([{'params': self.param_list},
-                 {'params': self.filter_list, 'lr': lr_filter, 'weight_decay':reg_filter}], lr, eps=eps, alpha=alpha)
+                 {'params': self.filter_list}], lr, eps=eps, alpha=alpha)
 
     def update(self, rollouts, value_prev_eval, filter_mem_latent_eval, filter_type):
         obs_shape = rollouts.obs.size()[2:]

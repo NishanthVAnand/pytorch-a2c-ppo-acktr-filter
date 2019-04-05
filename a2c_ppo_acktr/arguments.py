@@ -70,15 +70,12 @@ def get_args():
     parser.add_argument('--port', type=int, default=8097,
                         help='port to run the server on (default: 8097)')
 
-    parser.add_argument('--est_filter', type=int, default=0)
-    parser.add_argument('--filter_type', type=str, default="FIR")
-    parser.add_argument('--filter_memory', type=int, default=8)
-    parser.add_argument('--lr_filter', type=float, default=1e-4)
-    parser.add_argument('--reg_filter', type=float, default=0.)
-    parser.add_argument('--num-frame-stack', type=int, default=4)
+    parser.add_argument('--filter-type', type=str, default="FIR")
+    parser.add_argument('--filter-memory', type=int, default=8)
+    parser.add_argument('--num-frame-stack', type=int, default=None)
     parser.add_argument('--comet', type=str, default="online")
 
-    parser.add_argument('--disable_log', type=bool, default=False)
+    parser.add_argument('--disable-log', type=bool, default=False)
     args = parser.parse_args()
 
     args.cuda = not args.no_cuda and torch.cuda.is_available()

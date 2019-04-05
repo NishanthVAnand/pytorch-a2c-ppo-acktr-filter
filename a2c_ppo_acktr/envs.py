@@ -28,10 +28,23 @@ try:
 except ImportError:
     pass
 
+try:
+    import gym_minigrid
+except ImportError:
+    pass
+
+try:
+    import gym_minigrid.wrappers as wrap
+except ImportError:
+    pass
+
 
 def make_env(env_id, seed, rank, log_dir, add_timestep, allow_early_resets):
     def _thunk():
-        if env_id.startswith("dm"):
+        if env_id.startswith("MiniGrid"):
+            env = wrap.ImgObsWrapper(gym.make(env_id))
+            is_minigrid = True
+        elif env_id.startswith("dm"):
             _, domain, task = env_id.split('.')
             env = dm_control2gym.make(domain_name=domain, task_name=task)
         else:
@@ -57,7 +70,7 @@ def make_env(env_id, seed, rank, log_dir, add_timestep, allow_early_resets):
         if is_atari:
             if len(env.observation_space.shape) == 3:
                 env = wrap_deepmind(env)
-        elif len(env.observation_space.shape) == 3:
+        elif len(env.observation_space.shape) == 3 and not is_minigrid:
             raise NotImplementedError("CNN models work only for atari,\n"
                 "please use a custom wrapper for a custom pixel input env.\n"
                 "See wrap_deepmind for an example.")
@@ -76,6 +89,11 @@ def make_vec_envs(env_name, seed, num_processes, gamma, log_dir, add_timestep,
     envs = [make_env(env_name, seed, i, log_dir, add_timestep, allow_early_resets)
             for i in range(num_processes)]
 
+    is_minigrid = False
+
+    if env_name.startswith("MiniGrid"):
+        is_minigrid = True
+
     if len(envs) > 1:
         envs = SubprocVecEnv(envs)
     else:
@@ -91,10 +109,12 @@ def make_vec_envs(env_name, seed, num_processes, gamma, log_dir, add_timestep,
 
     if num_frame_stack is not None:
         envs = VecPyTorchFrameStack(envs, num_frame_stack, device)
+    elif len(envs.observation_space.shape) == 3 and is_minigrid:
+        envs = VecPyTorchFrameStack(envs, 1, device)
     elif len(envs.observation_space.shape) == 3:
         envs = VecPyTorchFrameStack(envs, num_frame_stack, device)
 
-    return envs
+    return envs, is_minigrid
 
 
 # Can be used to test recurrent policies for Reacher-v2
