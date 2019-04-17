@@ -45,7 +45,7 @@ class A2C_ACKTR():
         action_shape = rollouts.actions.size()[-1]
         num_steps, num_processes, _ = rollouts.rewards.size()
 
-        values, action_log_probs, dist_entropy, _ , value_prev_eval, filter_mem_latent_eval, att_list = self.actor_critic.evaluate_actions(
+        values, action_log_probs, dist_entropy, _ , value_prev_eval, filter_mem_latent_eval, att_list, grad_term = self.actor_critic.evaluate_actions(
             rollouts.obs[:-1],
             rollouts.recurrent_hidden_states[0],
             rollouts.masks[:-1],
@@ -59,7 +59,7 @@ class A2C_ACKTR():
         action_log_probs = action_log_probs.view(num_steps, num_processes, 1)
 
         advantages = rollouts.returns[:-1] - values
-        value_loss = advantages.pow(2).mean()
+        value_loss = (advantages*grad_term).pow(2).mean()  # credit-TD error, assignment-FIR
 
         action_loss = -(advantages.detach() * action_log_probs).mean()
 

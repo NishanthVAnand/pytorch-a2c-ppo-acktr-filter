@@ -76,6 +76,7 @@ class Policy(nn.Module):
     def evaluate_actions(self, inputs, rnn_hxs, masks, action, latent_target, value_prev_eval=None, filter_mem_latent_eval=None, filter_type=None):
 
         value_list = []
+        grad_term = [] # credit-TD error, assignment-FIR
         action_log_probs = []
         dist_entropy = []
 
@@ -93,15 +94,18 @@ class Policy(nn.Module):
 
             dist = self.dist(actor_features)
 
-            value_list.append(value_curr_p)
+            grad_term.append(value_curr_p) # credit-TD error, assignment-FIR
+            value_list.append(value.detach())
+            #value_list.append(value_curr_p)
             action_log_probs.append(dist.log_probs(action[i,:,:]))
             dist_entropy.append(dist.entropy())
 
+        grad_torch = torch.stack(grad_term)
         action_log_probs = torch.stack(action_log_probs)
         dist_entropy = torch.stack(dist_entropy).mean()
         v = torch.stack(value_list)
 
-        return v, action_log_probs, dist_entropy, rnn_hxs, value_prev_eval, filter_mem_latent_eval, attention_param.detach()
+        return v, action_log_probs, dist_entropy, rnn_hxs, value_prev_eval, filter_mem_latent_eval, attention_param.detach(), grad_torch
 
 
 class NNBase(nn.Module):
