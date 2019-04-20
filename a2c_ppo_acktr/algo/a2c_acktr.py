@@ -59,7 +59,7 @@ class A2C_ACKTR():
         action_log_probs = action_log_probs.view(num_steps, num_processes, 1)
 
         advantages = rollouts.returns[:-1] - values
-        value_loss = (advantages*grad_term).pow(2).mean()  # credit-TD error, assignment-FIR
+        value_loss = (advantages*grad_term.unsqueeze(1)).pow(2).mean()  # credit-TD error, assignment-FIR
 
         action_loss = -(advantages.detach() * action_log_probs).mean()
 
