@@ -248,6 +248,7 @@ def main():
 
             del filter_coeff_list[:]
 
+        '''
         if (args.eval_interval is not None
                 and len(episode_rewards) > 1
                 and j % args.eval_interval == 0):
@@ -298,6 +299,7 @@ def main():
             except IOError:
                 pass
 
-
+        '''
+        
 if __name__ == "__main__":
     main()
