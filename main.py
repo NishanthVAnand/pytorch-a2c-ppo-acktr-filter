@@ -52,6 +52,7 @@ if args.cuda and torch.cuda.is_available() and args.cuda_deterministic:
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
 
+'''
 try:
     os.makedirs(args.log_dir)
 except OSError:
@@ -67,7 +68,7 @@ except OSError:
     files = glob.glob(os.path.join(eval_log_dir, '*.monitor.csv'))
     for f in files:
         os.remove(f)
-
+'''
 
 def main():
     torch.set_num_threads(1)
