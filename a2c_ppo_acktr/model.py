@@ -5,6 +5,7 @@ import numpy as np
 
 from a2c_ppo_acktr.distributions import Categorical, DiagGaussian, Bernoulli
 from a2c_ppo_acktr.utils import init
+import copy
 
 
 class Flatten(nn.Module):
@@ -73,7 +74,7 @@ class Policy(nn.Module):
         value, _, _, next_latent = self.base(inputs, rnn_hxs, masks)
         return value, next_latent
 
-    def evaluate_actions(self, inputs, rnn_hxs, masks, action, latent_target, value_prev_eval=None, filter_mem_latent_eval=None, filter_type=None):
+    def evaluate_actions(self, inputs, rnn_hxs, masks, action, latent_target, value_prev_eval=None, filter_mem_latent_eval=None, filter_type=None, filter_mem=1):
 
         value_list = []
         grad_term = [] # credit-TD error, assignment-FIR
@@ -83,13 +84,25 @@ class Policy(nn.Module):
         for i in range(inputs.size()[0]):
             value, actor_features, _, filter_latent = self.base(inputs[i,:,:], rnn_hxs, masks[i,:,:])
 
+
+            value_prev_eval_torch = torch.stack(value_prev_eval)
+            filter_mem_latent_eval_torch = torch.stack(filter_mem_latent_eval)
+            
+            value_prev_eval_torch = copy.copy(torch.cat((value_prev_eval_torch, value[:].reshape(1,-1)))[-filter_mem:])
+            filter_mem_latent_eval_torch = copy.copy(torch.cat((filter_mem_latent_eval_torch, filter_latent.unsqueeze(0)))[-filter_mem:])
+
+            '''           
             value_prev_eval.append(value[:])
             filter_mem_latent_eval.append(filter_latent[:])
 
-            value_prev_eval_torch = torch.stack(list(value_prev_eval)).squeeze(2)
-            filter_mem_latent_eval_torch = torch.stack(list(filter_mem_latent_eval))
+            value_prev_eval = value_prev_eval[-8:]
+            filter_mem_latent_eval = filter_mem_latent_eval[-8:]
 
-            attention_param = F.softmax(torch.einsum('abc,bc -> ab', filter_mem_latent_eval_torch, latent_target), dim=0)
+            value_prev_eval_torch = torch.stack(value_prev_eval).squeeze(2)
+            filter_mem_latent_eval_torch = torch.stack(filter_mem_latent_eval)
+            '''
+
+            attention_param = F.softmax(torch.einsum('abc,bc -> ab', filter_mem_latent_eval_torch, latent_target), dim=0).detach()
             value_curr_p = torch.sum(attention_param * value_prev_eval_torch, dim=0)
 
             dist = self.dist(actor_features)
@@ -104,8 +117,8 @@ class Policy(nn.Module):
         action_log_probs = torch.stack(action_log_probs)
         dist_entropy = torch.stack(dist_entropy).mean()
         v = torch.stack(value_list)
-
-        return v, action_log_probs, dist_entropy, rnn_hxs, value_prev_eval, filter_mem_latent_eval, attention_param.detach(), grad_torch
+        
+        return v, action_log_probs, dist_entropy, rnn_hxs, [i for i in value_prev_eval_torch], [i for i in filter_mem_latent_eval_torch], attention_param.detach(), grad_torch
 
 
 class NNBase(nn.Module):
@@ -327,12 +340,5 @@ class MLPBase(NNBase):
 
         hidden_critic = self.critic(x)
         hidden_actor = self.actor(x)
-
-        '''
-        if self.est_filter:
-            filter_value = self.filter_net(hidden_critic)
-        else:
-            filter_value = torch.ones_like(masks)
-        '''
 
         return self.critic_linear(hidden_critic), hidden_actor, rnn_hxs, hidden_critic

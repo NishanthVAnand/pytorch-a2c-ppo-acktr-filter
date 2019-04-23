@@ -40,7 +40,7 @@ class A2C_ACKTR():
             self.optimizer = optim.RMSprop([{'params': self.param_list},
                  {'params': self.filter_list}], lr, eps=eps, alpha=alpha)
 
-    def update(self, rollouts, value_prev_eval, filter_mem_latent_eval, filter_type):
+    def update(self, rollouts, value_prev_eval, filter_mem_latent_eval, filter_type, filter_mem):
         obs_shape = rollouts.obs.size()[2:]
         action_shape = rollouts.actions.size()[-1]
         num_steps, num_processes, _ = rollouts.rewards.size()
@@ -53,7 +53,8 @@ class A2C_ACKTR():
             rollouts.att_target,
             value_prev_eval=value_prev_eval,
             filter_mem_latent_eval = filter_mem_latent_eval,
-            filter_type=filter_type)
+            filter_type=filter_type,
+            filter_mem=filter_mem)
 
         values = values.view(num_steps, num_processes, 1)
         action_log_probs = action_log_probs.view(num_steps, num_processes, 1)

@@ -129,13 +129,18 @@ def main():
 
     filter_coeff_list = []
 
-    for j in range(num_updates):
+    '''
+    value_prev = collections.deque([torch.zeros(args.num_processes, 1).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
+    value_prev_eval = collections.deque([torch.zeros(args.num_processes, 1).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
+    filter_mem_latent_eval = collections.deque([torch.zeros(args.num_processes, hidden_size).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
+    '''
     
-        value_prev = collections.deque([torch.zeros(args.num_processes, 1).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
-        value_prev_eval = collections.deque([torch.zeros(args.num_processes, 1).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
+    value_prev = [torch.zeros(args.num_processes, 1).to(device) for i in range(args.filter_memory)]
+    value_prev_eval = [torch.zeros(args.num_processes, ).to(device) for i in range(args.filter_memory)]
+    filter_mem_latent_eval = [torch.zeros(args.num_processes, hidden_size).to(device) for i in range(args.filter_memory)]
+    
 
-        #filter_mem_latent = collections.deque([torch.zeros(args.num_processes, hidden_size).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
-        filter_mem_latent_eval = collections.deque([torch.zeros(args.num_processes, hidden_size).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
+    for j in range(num_updates):
 
         if args.filter_type == "IIR":
             raise NotImplementedError
@@ -184,7 +189,7 @@ def main():
 
         rollouts.compute_returns(next_value, next_latent, args.use_gae, args.gamma, args.tau)
 
-        value_loss, action_loss, dist_entropy, value_prev_eval, filter_mem_latent_eval, att_list = agent.update(rollouts, value_prev_eval, filter_mem_latent_eval, filter_type=args.filter_type)
+        value_loss, action_loss, dist_entropy, value_prev_eval, filter_mem_latent_eval, att_list = agent.update(rollouts, value_prev_eval, filter_mem_latent_eval, filter_type=args.filter_type, filter_mem=args.filter_memory)
 
         filter_coeff_list.append(att_list)
         rollouts.after_update()
@@ -300,6 +305,6 @@ def main():
                 pass
 
         '''
-        
+
 if __name__ == "__main__":
     main()
