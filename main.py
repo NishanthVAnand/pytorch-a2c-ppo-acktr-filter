@@ -21,6 +21,8 @@ from a2c_ppo_acktr.storage import RolloutStorage
 from a2c_ppo_acktr.utils import get_vec_normalize, update_linear_schedule
 from a2c_ppo_acktr.visualize import visdom_plot
 
+import pickle
+
 import collections
 
 args = get_args()
@@ -120,6 +122,8 @@ def main():
                         actor_critic.recurrent_hidden_state_size)
 
     obs = envs.reset()
+    obs = obs + torch.randn_like(obs) * args.noise_obs
+
     rollouts.obs[0].copy_(obs)
     rollouts.to(device)
 
@@ -129,19 +133,17 @@ def main():
 
     filter_coeff_list = []
 
-    '''
-    value_prev = collections.deque([torch.zeros(args.num_processes, 1).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
-    value_prev_eval = collections.deque([torch.zeros(args.num_processes, 1).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
-    filter_mem_latent_eval = collections.deque([torch.zeros(args.num_processes, hidden_size).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
-    '''
-    
-    value_prev = [torch.zeros(args.num_processes, 1).to(device) for i in range(args.filter_memory)]
-    value_prev_eval = [torch.zeros(args.num_processes, ).to(device) for i in range(args.filter_memory)]
-    filter_mem_latent_eval = [torch.zeros(args.num_processes, hidden_size).to(device) for i in range(args.filter_memory)]
-    
+    all_rewards_local = deque()
+    all_frame_local = deque()
+    all_filter_mean_local = deque()
+    all_filter_std_local = deque()
 
     for j in range(num_updates):
 
+        value_prev = collections.deque([torch.zeros(args.num_processes, 1).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
+        value_prev_eval = collections.deque([torch.zeros(args.num_processes, 1).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
+        filter_mem_latent_eval = collections.deque([torch.zeros(args.num_processes, hidden_size).to(device) for i in range(args.filter_memory)], maxlen=args.filter_memory)
+    
         if args.filter_type == "IIR":
             raise NotImplementedError
 
@@ -168,6 +170,7 @@ def main():
 
             # Obser reward and next obs
             obs, reward, done, infos = envs.step(action)
+            obs = obs + torch.randn_like(obs) * args.noise_obs
 
             for info in infos:
                 if 'episode' in info.keys():
@@ -210,7 +213,7 @@ def main():
             save_model = [save_model,
                           getattr(get_vec_normalize(envs), 'ob_rms', None)]
 
-            torch.save(save_model, os.path.join(save_path, args.env_name +"_seed_"+str(args.seed) + "num_filter_" + str(args.filter_memory) + ".pt"))
+            torch.save(save_model, os.path.join(save_path, args.env_name +"_seed_"+str(args.seed)+"_filter_mem_"+str(args.filter_memory)+"_entropy_"+str(args.entropy_coef)+"_steps_"+str(args.num_steps)+"_noise_obs_"+str(args.noise_obs)+".pt"))
 
         total_num_steps = (j + 1) * args.num_processes * args.num_steps
 
@@ -250,6 +253,11 @@ def main():
 
             experiment.log_metrics(filter_coeff_mean, step=j * args.num_steps * args.num_processes)
             experiment.log_metrics(filter_coeff_std, step=j * args.num_steps * args.num_processes)
+
+            all_rewards_local.append(np.mean(episode_rewards))
+            all_frame_local.append(total_num_steps)
+            all_filter_mean_local.append(filter_mean)
+            all_filter_std_local.append(filter_std)
 
             del filter_coeff_list[:]
 
@@ -305,6 +313,17 @@ def main():
                 pass
 
         '''
+    with open(args.save_local_dir+"Rewards_"+str(args.env_name)+"_seed_"+str(args.seed)+"_filter_mem_"+str(args.filter_memory)+"_entropy_"+str(args.entropy_coef)+"_steps_"+str(args.num_steps)+"_noise_obs_"+str(args.noise_obs)+".pkl", 'wb') as f:
+        pickle.dump(all_rewards_local, f)
+
+    with open(args.save_local_dir+"Frames_"+str(args.env_name)+"_seed_"+str(args.seed)+"_filter_mem_"+str(args.filter_memory)+"_entropy_"+str(args.entropy_coef)+"_steps_"+str(args.num_steps)+"_noise_obs_"+str(args.noise_obs)+".pkl", 'wb') as f:
+        pickle.dump(all_frame_local, f)
+
+    with open(args.save_local_dir+"filter_mean_"+str(args.env_name)+"_seed_"+str(args.seed)+"_filter_mem_"+str(args.filter_memory)+"_entropy_"+str(args.entropy_coef)+"_steps_"+str(args.num_steps)+"_noise_obs_"+str(args.noise_obs)+".pkl", 'wb') as f:
+        pickle.dump(all_filter_mean_local, f)
+
+    with open(args.save_local_dir+"filter_std_"+str(args.env_name)+"_seed_"+str(args.seed)+"_filter_mem_"+str(args.filter_memory)+"_entropy_"+str(args.entropy_coef)+"_steps_"+str(args.num_steps)+"_noise_obs_"+str(args.noise_obs)+".pkl", 'wb') as f:
+        pickle.dump(all_filter_std_local, f)
 
 if __name__ == "__main__":
     main()

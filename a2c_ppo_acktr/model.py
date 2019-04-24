@@ -83,33 +83,20 @@ class Policy(nn.Module):
 
         for i in range(inputs.size()[0]):
             value, actor_features, _, filter_latent = self.base(inputs[i,:,:], rnn_hxs, masks[i,:,:])
+            value_list.append(value.detach())
 
-
-            value_prev_eval_torch = torch.stack(value_prev_eval)
-            filter_mem_latent_eval_torch = torch.stack(filter_mem_latent_eval)
-            
-            value_prev_eval_torch = copy.copy(torch.cat((value_prev_eval_torch, value[:].reshape(1,-1)))[-filter_mem:])
-            filter_mem_latent_eval_torch = copy.copy(torch.cat((filter_mem_latent_eval_torch, filter_latent.unsqueeze(0)))[-filter_mem:])
-
-            '''           
             value_prev_eval.append(value[:])
             filter_mem_latent_eval.append(filter_latent[:])
 
-            value_prev_eval = value_prev_eval[-8:]
-            filter_mem_latent_eval = filter_mem_latent_eval[-8:]
-
-            value_prev_eval_torch = torch.stack(value_prev_eval).squeeze(2)
-            filter_mem_latent_eval_torch = torch.stack(filter_mem_latent_eval)
-            '''
-
-            attention_param = F.softmax(torch.einsum('abc,bc -> ab', filter_mem_latent_eval_torch, latent_target), dim=0).detach()
+            value_prev_eval_torch = torch.stack(list(value_prev_eval)).squeeze(2)
+            filter_mem_latent_eval_torch = torch.stack(list(filter_mem_latent_eval))
+   
+            attention_param = F.softmax(torch.einsum('abc,bc -> ab', filter_mem_latent_eval_torch, latent_target), dim=0)
             value_curr_p = torch.sum(attention_param * value_prev_eval_torch, dim=0)
 
             dist = self.dist(actor_features)
 
             grad_term.append(value_curr_p) # credit-TD error, assignment-FIR
-            value_list.append(value.detach())
-            #value_list.append(value_curr_p)
             action_log_probs.append(dist.log_probs(action[i,:,:]))
             dist_entropy.append(dist.entropy())
 
@@ -117,8 +104,8 @@ class Policy(nn.Module):
         action_log_probs = torch.stack(action_log_probs)
         dist_entropy = torch.stack(dist_entropy).mean()
         v = torch.stack(value_list)
-        
-        return v, action_log_probs, dist_entropy, rnn_hxs, [i for i in value_prev_eval_torch], [i for i in filter_mem_latent_eval_torch], attention_param.detach(), grad_torch
+
+        return v, action_log_probs, dist_entropy, rnn_hxs, [item.detach() for item in value_prev_eval], [item.detach() for item in filter_mem_latent_eval], attention_param.detach(), grad_torch
 
 
 class NNBase(nn.Module):
@@ -293,7 +280,6 @@ class CNN_minigrid(NNBase):
             x, rnn_hxs = self._forward_gru(x, rnn_hxs, masks)
 
         return self.critic_linear(x), x, rnn_hxs, x
-
 
 
 class MLPBase(NNBase):

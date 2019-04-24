@@ -59,8 +59,10 @@ class A2C_ACKTR():
         values = values.view(num_steps, num_processes, 1)
         action_log_probs = action_log_probs.view(num_steps, num_processes, 1)
 
+        #advantages = rollouts.returns[:-1] - grad_term.unsqueeze(2)
+        #value_loss = advantages.pow(2).mean()
         advantages = rollouts.returns[:-1] - values
-        value_loss = (-2*advantages*grad_term.unsqueeze(1)).mean()  # credit-TD error, assignment-FIR
+        value_loss = (-2*advantages*grad_term.unsqueeze(2)).mean()  # credit-TD error, assignment-FIR
         action_loss = -(advantages.detach() * action_log_probs).mean()
 
         if self.acktr and self.optimizer.steps % self.optimizer.Ts == 0:

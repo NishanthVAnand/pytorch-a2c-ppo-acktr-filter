@@ -76,6 +76,8 @@ def get_args():
     parser.add_argument('--comet', type=str, default="online")
 
     parser.add_argument('--disable-log', type=bool, default=False)
+    parser.add_argument('--noise-obs', type=float, default=0.0)
+    parser.add_argument('--save-local-dir', default='../results_mujoco/')
     args = parser.parse_args()
 
     args.cuda = not args.no_cuda and torch.cuda.is_available()
